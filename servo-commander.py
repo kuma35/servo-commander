@@ -19,6 +19,7 @@ class CmdServo(object) :
     def __init__(self) :
         self.packet = []
         self.recv = []
+        self.label_fmt = '{0:>30}'
 
     def get_checksum(self, packet) :
         """ calculate checksum byte from packet. """
@@ -89,121 +90,71 @@ class CmdInfo(CmdServo) :
 
     def execute(self, ser) :
         ser.write(self.packet)
-        self.recv.append(ser.read()) # header 0xFD(253) 
-        self.recv.append(ser.read()) # header 0xDF(223)
-        self.recv.append(ser.read()) # servo id
-        self.recv.append(ser.read()) # flag
-        self.recv.append(ser.read()) # addr
-        self.recv.append(ser.read()) # length
-        self.recv.append(ser.read()) # count == 1
-        for i in range(0, int.from_bytes(self.recv[5], 'big')) :
-            self.recv.append(ser.read())
+        self.recv.extend(list(ser.read(7)))
+        #self.recv.append(ser.read()) # header 0xFD(253) 
+        #self.recv.append(ser.read()) # header 0xDF(223)
+        #self.recv.append(ser.read()) # servo id
+        #self.recv.append(ser.read()) # flag
+        #self.recv.append(ser.read()) # addr
+        #self.recv.append(ser.read()) # length
+        #self.recv.append(ser.read()) # count == 1
+        #for i in range(0, ord(self.recv[5])) :
+        #    self.recv.append(ser.read())
+        self.recv.extend(list(ser.read(self.recv[5])))
         self.recv.append(ser.read()) # checksum
         return self.recv
 
     def info(self, pp) :
-        #print("sum,sum")
-        #pp.pprint(self.get_checksum(self.packet[0:-1]))
-        #pp.pprint(self.recv[-1])
-        #recv = self.recv[:-1]
-        #checksum = self.get_checksum(recv)
-        #print('checksum:{0}'.format(checksum))
-        #print("checksum ok")
-        sum = ord(self.recv[2])
+        print('Returned packet:')
+        
+        sum = self.recv[2]
         for value in self.recv[3:-1] :
-            sum ^= ord(value)
+            sum ^= value
         print('calculate checksum:{0}'.format(sum))
-        print('recv checksum:{0}'.format(ord(self.recv[-1])))
+        print('recv checksum:{0}'.format(self.recv[-1]))
         if sum == ord(self.recv[-1]) :
             print('checksum OK')
         else :
             print('checksum NG')
-        print("Header(0xFD(253),0xDF(223)):", end='')
-        pp.pprint(self.recv[0:2])
-        
-        print("ID:", end='')
-        pp.pprint(self.recv[2])
-        
-        print("Flags:", end='')
-        pp.pprint(self.recv[3])
-        
-        print("Address:", end='')
-        pp.pprint(self.recv[4])
-        
-        print("Length:", end='')
-        pp.pprint(self.recv[5])
-        
-        print("Count(1):", end='')
-        pp.pprint(self.recv[6])
+        print((self.label_fmt+':{1:#x},{2:#x}').format('Header', self.recv[0], self.recv[1]))
+        print((self.label_fmt+':{1}').format('ID', self.recv[2]))
+        print((self.label_fmt+':{1:#010b}').format('Flags', self.recv[3]))        # 08b -> #010b :-)
+        print((self.label_fmt+':{1:#x}').format('Address', self.recv[4]))
+        print((self.label_fmt+':{1}').format('Length', self.recv[5]))
+        print((self.label_fmt+':{1}').format('Count(1)', self.recv[6]))
 
         if self.section == 3:
             memory = self.recv[7:-1]
 
-            print("Model Number L,H(50H,40H):", end='')
-            pp.pprint(memory[0:2])
-
-            print("Firmware Version:", end='')
-            pp.pprint(memory[2])
-
-            print("Servo ID:", end='')
-            pp.pprint(memory[4])
-
-            print("Reverse:", end='')
-            pp.pprint(memory[5])
-
-            print("Baud Rate:", end='')
-            pp.pprint(memory[6])
-
-            print("Return Delay:", end='')
-            pp.pprint(memory[7])
-
-            lh=[ord(memory[8]), ord(memory[9])]
-            print('CW Angle Limit L,H:{0}'.format(int.from_bytes(lh, 'little', signed=True)), end='')
-            pp.pprint(memory[8:10])
-
-            lh=[ord(memory[10]), ord(memory[11])]
-            print('CCW Angle Limit L,H:{0}'.format(int.from_bytes(lh, 'little', signed=True)), end='')
-            pp.pprint(memory[10:12])
-
-            lh=[ord(memory[14]), ord(memory[15])]
-            print('Temperture Limit L,H:{0}'.format(int.from_bytes(lh,'little', signed=True)), end='')
-            pp.pprint(memory[14:16])
-
-            print('Damper:', end='')
-            pp.pprint(memory[20])
-
-            print('Torque in Silence:', end='')
-            pp.pprint(memory[22])
-
-            print('Warm-up Time:', end='')
-            pp.pprint(memory[23])
-
-            print('CW Compliance Margin:', end='')
-            pp.pprint(memory[24])
-            
-            print('CCW Compliance Margin:', end='')
-            pp.pprint(memory[25])
-
-            print('CW Compliance Slope:', end='')
-            pp.pprint(memory[26])
-            
-            print('CCW Compliance Slope:', end='')
-            pp.pprint(memory[27])
-
-            lh=[ord(memory[28]), ord(memory[29])]
-            print('Punch L,H:{0}'.format(int.from_bytes(lh, 'little', signed=True)), end='')
-            pp.pprint(memory[28:30])
+            print((self.label_fmt+':{1:#x},{2:#x}').format('Model Number L,H', memory[0], memory[1]))
+            print((self.label_fmt+':{1}').format('Firmware Version', memory[2]))
+            print((self.label_fmt+':{1}').format('Servo ID', memory[4]))
+            print((self.label_fmt+':{1}').format('Reverse', memory[5]))
+            print((self.label_fmt+':{1:#x}').format('Baud Rate', memory[6]))
+            print((self.label_fmt+':{1}').format('Return Delay', memory[7]))
+            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('CW Angle Limit L,H',
+                                                        int.from_bytes(list(memory[8:10]), 'little', signed=True),
+                                                        memory[8], memory[9]))
+            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('CCW Angle Limit L,H',
+                                                        int.from_bytes(list(memory[10:12]), 'little', signed=True),
+                                                        memory[10], memory[11]))
+            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Temperture Limit L,H',
+                                                        int.from_bytes(list(memory[14:16]),'little', signed=True),
+                                                        memory[14], memory[15]))
+            print((self.label_fmt+':{1}').format('Damper', memory[20]))
+            print((self.label_fmt+':{1}').format('Torque in Silence', memory[22]))
+            print((self.label_fmt+':{1}').format('Warm-up Time',memory[23]))
+            print((self.label_fmt+':{1}').format('CW Compliance Margin', memory[24]))
+            print((self.label_fmt+':{1}').format('CCW Compliance Margin', memory[25]))
+            print((self.label_fmt+':{1}').format('CW Compliance Slope', memory[26]))
+            print((self.label_fmt+':{1}').format('CCW Compliance Slope', memory[27]))
+            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Punch L,H',
+                                                        int.from_bytes(list(memory[28:30]), 'little', signed=True),
+                                                        memory[28], memory[29]))
         else:
             print("Data:", end='')
             pp.pprint(self.recv[7:-2])
-            
-        
-        print("Checksum:", end='')
-        pp.pprint(self.recv[-1])
-        #else :
-        #    print("invalid checksum.")
-        #    print("recive packet:", end='')
-        #    pp.pprint(self.recv)
+        print((self.label_fmt+':{1:#x}').format('Checksum', ord(self.recv[-1])))
 
 def main() :
     parser = argparse.ArgumentParser(description='Manupirate FUTABA command servo RS405CB.')
