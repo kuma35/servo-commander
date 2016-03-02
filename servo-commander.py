@@ -119,7 +119,7 @@ class CmdAngle(CmdServo) :
 
     def prepare(self, servo_id, degree, speed) :
         degree_packet = list(degree.to_bytes(2, 'little', signed=True))
-        speed_packet = list(speed.to_byotes(2, 'little', signed=True))
+        speed_packet = list(speed.to_bytes(2, 'little', signed=True))
         self.packet = array.array('B',
                                   [0xFA, 0xAF, servo_id, 0x00, 0x1E, 0x04, 0x01])
         self.packet.extend(degree_packet)
@@ -205,12 +205,8 @@ class CmdInfo(CmdServo) :
         print((self.label_fmt+':{1:#x}').format('Baud Rate', memory[6]))
         print((self.label_fmt+':{1}').format('Return Delay', memory[7]))
         self._print_l_h('CW Angle Limit L,H', memory[8:10])
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('CCW Angle Limit L,H',
-                                                              int.from_bytes(list(memory[10:12]), 'little', signed=True),
-                                                              memory[10], memory[11]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Temperture Limit L,H',
-                                                              int.from_bytes(list(memory[14:16]),'little', signed=True),
-                                                              memory[14], memory[15]))
+        self._print_l_h('CCW Angle Limit L,H', memory[10:12])
+        self._print_l_h('Temperture Limit L,H', memory[14:16])
         print((self.label_fmt+':{1}').format('Damper', memory[20]))
         print((self.label_fmt+':{1}').format('Torque in Silence', memory[22]))
         print((self.label_fmt+':{1}').format('Warm-up Time',memory[23]))
@@ -218,36 +214,20 @@ class CmdInfo(CmdServo) :
         print((self.label_fmt+':{1}').format('CCW Compliance Margin', memory[25]))
         print((self.label_fmt+':{1}').format('CW Compliance Slope', memory[26]))
         print((self.label_fmt+':{1}').format('CCW Compliance Slope', memory[27]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Punch L,H',
-                                                              int.from_bytes(list(memory[28:30]), 'little', signed=True),
-                                                              memory[28], memory[29]))
+        self._print_l_h('Punch L,H', memory[28:30])
 
     def _print_section_5(self, memory) :
         """ memory No.30-59.  offset 30"""
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Goal Posision L,H',
-                                                              int.from_bytes(list(memory[0:2]), 'little', signed=True),
-                                                              memory[0], memory[1]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Goal Time L,H',
-                                                              int.from_bytes(list(memory[2:4]), 'little', signed=True),
-                                                              memory[2], memory[3]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Posion L,H',
-                                                              int.from_bytes(list(memory[12:14]), 'little', signed=True),
-                                                              memory[12], memory[13]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Time L,H',
-                                                              int.from_bytes(list(memory[14:16]), 'little', signed=True),
-                                                              memory[14], memory[15]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Speed L,H',
-                                                              int.from_bytes(list(memory[16:18]), 'little', signed=True),
-                                                              memory[16], memory[17]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Current L,H',
-                                                              int.from_bytes(list(memory[18:20]), 'little', signed=True),
-                                                              memory[18], memory[19]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Temperture L,H',
-                                                              int.from_bytes(list(memory[20:22]), 'little', signed=True),
-                                                              memory[20], memory[21]))
-        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Volts L,H',
-                                                              int.from_bytes(list(memory[22:24]), 'little', signed=True),
-                                                              memory[22], memory[23]))
+        self._print_l_h('Goal Posision L,H', memory[0:2])
+        self._print_l_h('Goal Time L,H', memory[2:4])
+        print((self.label_fmt+':{1}').format('Max Torque', memory[5]))
+        print((self.label_fmt+':{1}').format('Torque Enable', memory[6]))
+        self._print_l_h('Present Posion L,H', memory[12:14])
+        self._print_l_h('Present Time L,H', memory[14:16])
+        self._print_l_h('Present Speed L,H', memory[16:18])
+        self._print_l_h('Present Current L,H', memory[18:20])
+        self._print_l_h('Present Temperture L,H', memory[20:22])
+        self._print_l_h('Present Volts L,H', memory[22:24])
     
     def prepare(self, servo_id, section, addr, length) :
         self.section = section
@@ -409,7 +389,7 @@ def main() :
             cmd_ack = CmdAck()
             cmd_ack.prepare(args.servo_id)
             cmd_ack.execute(ser)
-            if len(cmd_ack.recv) == 0 or ord(cmd_ack.recv[0]) != 7 :
+            if len(cmd_ack.recv) == 0 or cmd_ack.recv[0] != bytes([7]) :
                 print("NO EXIST Servo ID's Servo. please check servo ID.")
                 sys.exit(1)
         cmd.execute(ser)
