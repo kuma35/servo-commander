@@ -114,6 +114,69 @@ class CmdReboot(CmdServo) :
     def info(self, pp) :
         pass
 
+class CmdAngle(CmdServo) :
+    """ Goal Angle and Goal Time. Please later Torque ON."""
+
+    def prepare(self, servo_id, degree, speed) :
+        degree_packet = list(degree.to_bytes(2, 'little', signed=True))
+        speed_packet = list(speed.to_byotes(2, 'little', signed=True))
+        self.packet = array.array('B',
+                                  [0xFA, 0xAF, servo_id, 0x00, 0x1E, 0x04, 0x01])
+        self.packet.extend(degree_packet)
+        self.packet.extend(speed_packet)
+        checksum = self.get_checksum(self.packet)
+        self.packet.append(checksum)
+        return self.packet
+
+    def execute(self, ser) :
+        super(CmdAngle, self).execute()
+        ser.write(self.packet)
+
+    def info(self, pp) :
+        pass
+
+class CmdMaxTorque(CmdServo) :
+    """ Set Max Torque. """
+
+    def prepare(self, servo_id, rate) :
+        self.packet = array.array('B',
+                                  [0xFA, 0xAF, servo_id, 0x00, 0x23, 0x01, 0x01, rae])
+        checksum = self.get_checksum(self.packet)
+        self.packet.append(checksum)
+        return self.packet
+
+    def execute(self, ser) :
+        super(CmdMaxTorque, self).execute()
+        ser.write(self.packet)
+
+    def info(self, pp) :
+        pass
+
+class CmdTorque(CmdServo) :
+    """ Torque on/off/brak """
+
+    def prepare(self, servo_id, flag) :
+        if flag == 'on':
+            value = 1
+        elif flag == 'off' :
+            value = 0
+        elif flag == 'break' :
+            value = 2
+        else :
+            raise CommandServoException('unknown torque flag. valid on/off/break.')
+        self.packet = array.array('B',
+                                  [0xFA, 0xAF, servo_id, 0x00, 0x24, 0x01, 0x01, value])
+        checksum = self.get_checksum(self.packet)
+        self.packet.append(checksum)
+        return self.packet
+
+    def execute(self, ser) :
+        super(CmdTorque, self).execute()
+        ser.write(self.packet)
+
+    def info(self, pp) :
+        pass
+
 class CmdInfo(CmdServo) :
     """ get servo infomation memory. """
 
@@ -126,6 +189,66 @@ class CmdInfo(CmdServo) :
                                11:range(30, 42),
                                13:range(60, 128), }
 
+    def _print_l_h(self, title, memory) :
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format(title,
+                                                              int.from_bytes(list(memory[0:2]), 'little', signed=True),
+                                                              memory[0], memory[1]))
+        
+    
+    def _print_section_3(self, memory) :
+        """ memory No.00-29. """
+        
+        print((self.label_fmt+':{1:#x},{2:#x}').format('Model Number L,H', memory[0], memory[1]))
+        print((self.label_fmt+':{1}').format('Firmware Version', memory[2]))
+        print((self.label_fmt+':{1}').format('Servo ID', memory[4]))
+        print((self.label_fmt+':{1}').format('Reverse', memory[5]))
+        print((self.label_fmt+':{1:#x}').format('Baud Rate', memory[6]))
+        print((self.label_fmt+':{1}').format('Return Delay', memory[7]))
+        self._print_l_h('CW Angle Limit L,H', memory[8:10])
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('CCW Angle Limit L,H',
+                                                              int.from_bytes(list(memory[10:12]), 'little', signed=True),
+                                                              memory[10], memory[11]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Temperture Limit L,H',
+                                                              int.from_bytes(list(memory[14:16]),'little', signed=True),
+                                                              memory[14], memory[15]))
+        print((self.label_fmt+':{1}').format('Damper', memory[20]))
+        print((self.label_fmt+':{1}').format('Torque in Silence', memory[22]))
+        print((self.label_fmt+':{1}').format('Warm-up Time',memory[23]))
+        print((self.label_fmt+':{1}').format('CW Compliance Margin', memory[24]))
+        print((self.label_fmt+':{1}').format('CCW Compliance Margin', memory[25]))
+        print((self.label_fmt+':{1}').format('CW Compliance Slope', memory[26]))
+        print((self.label_fmt+':{1}').format('CCW Compliance Slope', memory[27]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Punch L,H',
+                                                              int.from_bytes(list(memory[28:30]), 'little', signed=True),
+                                                              memory[28], memory[29]))
+
+    def _print_section_5(self, memory) :
+        """ memory No.30-59.  offset 30"""
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Goal Posision L,H',
+                                                              int.from_bytes(list(memory[0:2]), 'little', signed=True),
+                                                              memory[0], memory[1]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Goal Time L,H',
+                                                              int.from_bytes(list(memory[2:4]), 'little', signed=True),
+                                                              memory[2], memory[3]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Posion L,H',
+                                                              int.from_bytes(list(memory[12:14]), 'little', signed=True),
+                                                              memory[12], memory[13]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Time L,H',
+                                                              int.from_bytes(list(memory[14:16]), 'little', signed=True),
+                                                              memory[14], memory[15]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Speed L,H',
+                                                              int.from_bytes(list(memory[16:18]), 'little', signed=True),
+                                                              memory[16], memory[17]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Current L,H',
+                                                              int.from_bytes(list(memory[18:20]), 'little', signed=True),
+                                                              memory[18], memory[19]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Temperture L,H',
+                                                              int.from_bytes(list(memory[20:22]), 'little', signed=True),
+                                                              memory[20], memory[21]))
+        print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Present Volts L,H',
+                                                              int.from_bytes(list(memory[22:24]), 'little', signed=True),
+                                                              memory[22], memory[23]))
+    
     def prepare(self, servo_id, section, addr, length) :
         self.section = section
         if section in [3, 5, 7, 9, 11, 13] :
@@ -169,36 +292,12 @@ class CmdInfo(CmdServo) :
         print((self.label_fmt+':{1}').format('Count(1)', self.recv[6]))
 
         if self.section == 3:
-            memory = self.recv[7:-1]
-
-            print((self.label_fmt+':{1:#x},{2:#x}').format('Model Number L,H', memory[0], memory[1]))
-            print((self.label_fmt+':{1}').format('Firmware Version', memory[2]))
-            print((self.label_fmt+':{1}').format('Servo ID', memory[4]))
-            print((self.label_fmt+':{1}').format('Reverse', memory[5]))
-            print((self.label_fmt+':{1:#x}').format('Baud Rate', memory[6]))
-            print((self.label_fmt+':{1}').format('Return Delay', memory[7]))
-            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('CW Angle Limit L,H',
-                                                        int.from_bytes(list(memory[8:10]), 'little', signed=True),
-                                                        memory[8], memory[9]))
-            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('CCW Angle Limit L,H',
-                                                        int.from_bytes(list(memory[10:12]), 'little', signed=True),
-                                                        memory[10], memory[11]))
-            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Temperture Limit L,H',
-                                                        int.from_bytes(list(memory[14:16]),'little', signed=True),
-                                                        memory[14], memory[15]))
-            print((self.label_fmt+':{1}').format('Damper', memory[20]))
-            print((self.label_fmt+':{1}').format('Torque in Silence', memory[22]))
-            print((self.label_fmt+':{1}').format('Warm-up Time',memory[23]))
-            print((self.label_fmt+':{1}').format('CW Compliance Margin', memory[24]))
-            print((self.label_fmt+':{1}').format('CCW Compliance Margin', memory[25]))
-            print((self.label_fmt+':{1}').format('CW Compliance Slope', memory[26]))
-            print((self.label_fmt+':{1}').format('CCW Compliance Slope', memory[27]))
-            print((self.label_fmt+':{1:5}({2:#x},{3:#x})').format('Punch L,H',
-                                                        int.from_bytes(list(memory[28:30]), 'little', signed=True),
-                                                        memory[28], memory[29]))
+            self._print_section_3(self.recv[7:-1])
+        elif self.section == 5:
+            self._print_section_5(self.recv[7:-1])
         else:
             print("Data:", end='')
-            pp.pprint(self.recv[7:-2])
+            pp.pprint(self.recv[7:-1])
         print((self.label_fmt+':{1:#x}').format('Checksum', ord(self.recv[-1])))
 
 def main() :
@@ -249,6 +348,27 @@ def main() :
                                        help='write to flash ROM.')
     subparser5 = subparsers.add_parser('reboot',
                                        help='Reboot Servo.')
+    subparser6 = subparsers.add_parser('angle',
+                                       help='set angle and speed.')
+    subparser6.add_argument('--speed',
+                            type=int,
+                            default=0x3fff,
+                            help='Goal Time. 0-0x3fff.')
+    subparser6.add_argument('degree',
+                            type=int,
+                            help='Goal Angle. 90degree to set 900.')
+    subparser7 = subparsers.add_parser('maxtorque',
+                                       help='max torque')
+    subparser7.add_argument('torque_rate',
+                            type=int,
+                            default=100,
+                            choices=range(0,101),
+                            help='max torque % 0-100')
+    subparser8 = subparsers.add_parser('torque',
+                                       help='torque on/off/break.')
+    subparser8.add_argument('torque_flag',
+                            choices=['on', 'off', 'break'],
+                            help='torque on/off/break')
     args = parser.parse_args()
     
     if args.subparser_name == 'ack' :
@@ -266,6 +386,15 @@ def main() :
     elif args.subparser_name == 'reboot' :
         cmd = CmdReboot()
         cmd.prepare(args.servo_id)
+    elif args.subparser_name == 'angle' :
+        cmd = CmdAngle()
+        cmd.prepare(args.servo_id, args.degree, args.speed)
+    elif args.subparser_name == 'maxtorque' :
+        cmd = CmdMaxTorque()
+        cmd.prepare(args.servo_id, args.torque_rate)
+    elif args.subparser_name == 'torque' :
+        cmd = CmdTorque()
+        cmd.prepare(args.servo_id, args.torque_flag)
     else :
         parser.exit(0, 'no specifiy command, nothing to do.\n')
     
