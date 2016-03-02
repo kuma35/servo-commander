@@ -7,6 +7,7 @@ import time
 #import locale
 import serial
 import argparse
+import sys
 
 class CmdServoException(object) :
     """ CmdServo and sub class exception. """
@@ -60,6 +61,59 @@ class CmdAck(CmdServo) :
         print('ACK(\\x07):', end='')
         pp.pprint(self.recv)
 
+class CmdSetId(CmdServo) :
+    """ Set Servo ID. """
+
+    def prepare(self, servo_id, new) :
+        self.packet = array.array('B',
+                                  [0xFA, 0xAF, servo_id, 0x00, 0x04, 0x01, 0x01, new])
+        checksum = self.get_checksum(self.packet)
+        self.packet.append(checksum)
+        return self.packet
+
+    def execute(self, ser) :
+        super(CmdSetId, self).execute()
+        ser.write(self.packet)
+
+    def info(self, pp) :
+        pass
+
+class CmdFlash(CmdServo) :
+    """ Write to flash ROM. """
+
+    def prepare(self, servo_id) :
+        self.packet = array.array('B',
+                                  [0xFA, 0xAF, servo_id, 0x40, 0xFF, 0x00, 0x00])
+        checksum = self.get_checksum(self.packet)
+        self.packet.append(checksum)
+        return self.packet
+
+    def execute(self, ser) :
+        super(CmdFlash, self).execute()
+        ser.write(self.packet)
+        time.sleep(1)
+
+    def info(self, pp) :
+        pass
+
+class CmdReboot(CmdServo) :
+    """ Reboot Servo. """
+
+    def prepare(self, servo_id) :
+        self.packet = array.array('B',
+                                  [0xFA, 0xAF, servo_id, 0x20, 0xFF, 0x00, 0x00])
+        checksum = self.get_checksum(self.packet)
+        self.packet.append(checksum)
+        return self.packet
+
+    def execute(self, ser) :
+        super(CmdReboot, self).execute()
+        ser.write(self.packet)
+        time.sleep(3)
+
+    def info(self, pp) :
+        pass
+
 class CmdInfo(CmdServo) :
     """ get servo infomation memory. """
 
@@ -91,15 +145,6 @@ class CmdInfo(CmdServo) :
     def execute(self, ser) :
         ser.write(self.packet)
         self.recv.extend(list(ser.read(7)))
-        #self.recv.append(ser.read()) # header 0xFD(253) 
-        #self.recv.append(ser.read()) # header 0xDF(223)
-        #self.recv.append(ser.read()) # servo id
-        #self.recv.append(ser.read()) # flag
-        #self.recv.append(ser.read()) # addr
-        #self.recv.append(ser.read()) # length
-        #self.recv.append(ser.read()) # count == 1
-        #for i in range(0, ord(self.recv[5])) :
-        #    self.recv.append(ser.read())
         self.recv.extend(list(ser.read(self.recv[5])))
         self.recv.append(ser.read()) # checksum
         return self.recv
@@ -166,22 +211,23 @@ def main() :
     parser.add_argument('-b', '--baud',
                          dest='baud',
                          default=115200)
+    parser.add_argument('-i', '--id',
+                        dest='servo_id',
+                        type=int,
+                        help='servo ID.',
+                        default=1)
+    parser.add_argument('--ack',
+                        action='store_true',
+                        default=True,
+                        help='Checking specified id\'s servo existance.')
     parser.add_argument('--dryrun',
                         action='store_true',
                         help='no port open, no execute.')
     subparsers = parser.add_subparsers(dest='subparser_name')
     subparser1 = subparsers.add_parser('ack',
                                        help='return ACK(\\x07)')
-    subparser1.add_argument('-i', '--id',
-                            dest='servo_id',
-                            default=1,
-                            help='specify servo id. default is %(default)s')
     subparser2 = subparsers.add_parser('info',
                                        help='read memory')
-    subparser2.add_argument('-i', '--id',
-                            dest='servo_id',
-                            default=1,
-                            help='specify servo id. default is %(default)s')
     subparser2.add_argument('-s', '--section',
                             dest='section',
                             type=int,
@@ -194,7 +240,15 @@ def main() :
     subparser2.add_argument('--length',
                             type=int,
                             help='section is 15, use --length .')
-   
+    subparser3 = subparsers.add_parser('setid',
+                                       help='set new servo ID to Servo. NOTICE:NO UPDATE FLASH.')
+    subparser3.add_argument('new',
+                            type=int,
+                            help='new servo ID.')
+    subparser4 = subparsers.add_parser('flash',
+                                       help='write to flash ROM.')
+    subparser5 = subparsers.add_parser('reboot',
+                                       help='Reboot Servo.')
     args = parser.parse_args()
     
     if args.subparser_name == 'ack' :
@@ -203,6 +257,15 @@ def main() :
     elif args.subparser_name == 'info' :
         cmd = CmdInfo()
         cmd.prepare(args.servo_id, args.section, args.addr, args.length)
+    elif args.subparser_name == 'setid' :
+        cmd = CmdSetId()
+        cmd.prepare(args.servo_id, args.new)
+    elif args.subparser_name == 'flash' :
+        cmd = CmdFlash()
+        cmd.prepare(args.servo_id)
+    elif args.subparser_name == 'reboot' :
+        cmd = CmdReboot()
+        cmd.prepare(args.servo_id)
     else :
         parser.exit(0, 'no specifiy command, nothing to do.\n')
     
@@ -213,10 +276,16 @@ def main() :
         pp.pprint(cmd.packet)
     else :
         ser = serial.Serial(args.port, args.baud, timeout=1)
+        if args.ack and args.subparser_name != 'ack' :
+            cmd_ack = CmdAck()
+            cmd_ack.prepare(args.servo_id)
+            cmd_ack.execute(ser)
+            if len(cmd_ack.recv) == 0 or ord(cmd_ack.recv[0]) != 7 :
+                print("NO EXIST Servo ID's Servo. please check servo ID.")
+                sys.exit(1)
         cmd.execute(ser)
         cmd.info(pp)
         ser.close()
 
 if __name__ == '__main__':
     main()
- 
