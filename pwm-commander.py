@@ -3,7 +3,7 @@
 # Controlling Arduino nano pwm servo.
 
 # short packet
-# 'EF','65', <<Flag>>, <<ID>>, <<addr>>, <<len>>, <<count>>, <<data>>..., <<sum>>
+# 'EF','65', <<Flag>>, <<addr>>, <<len>>, <<data>>..., <<sum>>
 # 
 # send FLAG
 # 0b01000000:Write to FLASH
@@ -11,7 +11,7 @@
 # 0b00000001:ACK
 #
 # return packet
-# 'EF', '66', <<flag>>, <<ID>>, <<addr>>, <<len>>, <<count>>, <<data>>.... <<sum>
+# 'EF', '66', <<flag>>, <<addr>>, <<len>>, <<data>>.... <<sum>
 # resp FLAG
 # 0b00000010:send packet error
 #
@@ -56,6 +56,10 @@ class CmdServoException(object) :
 
 class CmdServo(object) :
     """ Base class for servo commands. """
+
+    FLAG_ACK = 0x01
+    FLAG_MEMORY = 0x02
+    FLAG_FLASH = 0x40
     
     def __init__(self) :
         self.packet = []
@@ -63,7 +67,11 @@ class CmdServo(object) :
         self.label_fmt = '{0:>30}'
 
     def get_checksum(self, packet) :
-        """ calculate checksum byte from packet. """
+        """
+        calculate checksum byte from packet. 
+        addr(next header) to chceksum -1 to xor.
+
+        """
         
         checksum = packet[2]
         for value in packet[3:] :
@@ -100,13 +108,15 @@ class CmdInfo(CmdServo) :
 
     def prepare(self) :
         self.packet = array.array('B',
-                                  [0xEF, 0x65, FLAG_MEMORY, 0, 0, 0, 1])
+                                  [0xEF, 0x65, CmdServo.FLAG_MEMORY, 0, 0])
         checksum = self.get_checksum(self.packet)
         self.packet.append(checksum)
         return self.packet
 
     def execute(self, ser) :
         ser.write(self.packet)
+        ser.flush()
+        time.sleep(0.5)
         self.recv.extend(list(ser.read(7)))
         self.recv.extend(list(ser.read(self.recv[5])))
         self.recv.append(ser.read()) # checksum
@@ -139,7 +149,7 @@ class CmdAck(CmdServo) :
 
     def prepare(self) :
         self.packet = array.array('B',
-                                  [0xEF, 0x65, 0x01, 0x00, 0x00, 0x00])
+                                  [0xEF, 0x65, CmdServo.FLAG_ACK, 0x00, 0x00, 0x00])
         checksum = self.get_checksum(self.packet)
         self.packet.append(checksum)
         return self.packet
@@ -147,7 +157,7 @@ class CmdAck(CmdServo) :
     def execute(self, ser) :
         super(CmdAck, self).execute()
         ser.write(self.packet)
-        time.sleep(1);
+        time.sleep(0.5);
         self.recv.append(ser.read())
         return self.recv
 
@@ -168,7 +178,7 @@ class CmdFlash(CmdServo) :
     def execute(self, ser) :
         super(CmdFlash, self).execute()
         ser.write(self.packet)
-        time.sleep(1)
+        ser.flush()
 
     def info(self, pp) :
         pass
@@ -187,8 +197,9 @@ class CmdAttach(CmdServo) :
         return self.packet
 
     def execute(self, ser) :
-        super(CmdReboot, self).execute()
+        super(CmdAttach, self).execute()
         ser.write(self.packet)
+        ser.flush()
 
     def info(self, pp) :
         pass
@@ -207,8 +218,9 @@ class CmdDetach(CmdServo) :
         return self.packet
 
     def execute(self, ser) :
-        super(CmdReboot, self).execute()
+        super(CmdDetach, self).execute()
         ser.write(self.packet)
+        ser.flush()
 
     def info(self, pp) :
         pass
@@ -231,6 +243,7 @@ class CmdAngle(CmdServo) :
     def execute(self, ser) :
         super(CmdAngle, self).execute()
         ser.write(self.packet)
+        ser.flush()
 
     def info(self, pp) :
         pass
@@ -244,7 +257,12 @@ def main() :
                          metavar='DEVICE')
     parser.add_argument('-b', '--baud',
                          dest='baud',
-                         default=9600)
+                         default=115200)
+    parser.add_argument('-w', '--wait',
+                        type=float,
+                        dest='wait',
+                        default=3.0,
+                        help='wait board prepare from port open.')
     parser.add_argument('--dryrun',
                         action='store_true',
                         help='no port open, no execute.')
@@ -281,7 +299,7 @@ def main() :
         cmd.prepare()
     elif args.subparser_name == 'info' :
         cmd = CmdInfo()
-        cmd.prepare(args.servo_id, args.section, args.addr, args.length)
+        cmd.prepare()
     elif args.subparser_name == 'flash' :
         cmd = CmdFlash()
         cmd.prepare(args.servo_id)
@@ -304,6 +322,8 @@ def main() :
         pp.pprint(cmd.packet)
     else :
         ser = serial.Serial(args.port, args.baud, timeout=1)
+        print('wait {w} sec. board prepare from port open.'.format(w=args.wait))
+        time.sleep(args.wait)
         cmd.execute(ser)
         cmd.info(pp)
         ser.close()
