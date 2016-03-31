@@ -49,6 +49,8 @@ import serial
 import argparse
 import sys
 
+Label_fmt = '{l:>30}'
+
 class CmdServoException(object) :
     """ CmdServo and sub class exception. """
 
@@ -60,11 +62,19 @@ class CmdServo(object) :
     FLAG_ACK = 0x01
     FLAG_MEMORY = 0x02
     FLAG_FLASH = 0x40
+
+    RESP_SIZE = {'HEADER':2, 'FLAG':1, 'ADDR':1, 'LEN':1, 'SUM':1,}
+    RESP_OFFSET = {'HEADER':0}
+    RESP_OFFSET['FLAG'] = RESP_OFFSET['HEADER'] + RESP_SIZE['HEADER']
+    RESP_OFFSET['ADDR'] = RESP_OFFSET['FLAG'] + RESP_SIZE['FLAG']
+    RESP_OFFSET['LEN'] = RESP_OFFSET['ADDR'] + RESP_SIZE['ADDR']
+    RESP_OFFSET['DATA'] = RESP_OFFSET['LEN'] + RESP_SIZE['LEN']
+
+    RESP_HEADER_SIZE = RESP_SIZE['HEADER']+RESP_SIZE['FLAG']+RESP_SIZE['ADDR']+RESP_SIZE['LEN']
     
     def __init__(self) :
         self.packet = []
         self.recv = []
-        self.label_fmt = '{0:>30}'
 
     def get_checksum(self, packet) :
         """
@@ -73,8 +83,8 @@ class CmdServo(object) :
 
         """
         
-        checksum = packet[2]
-        for value in packet[3:] :
+        checksum = packet[0]
+        for value in packet[1:] :
             checksum ^= value
         return checksum
 
@@ -89,7 +99,6 @@ class CmdServo(object) :
         """ pretty print recieve packet. """
         pass
 
-Label_fmt = '{l:>30}'
 
 def print_l_h(title, memory) :
     print((Label_fmt+':{v:5}({bl:#x},{bh:#x})').format(l=title,
@@ -103,46 +112,83 @@ def print_h_l(title, memory) :
 class CmdInfo(CmdServo) :
     """ get servo infomation memory. """
 
+    M = {'I2C':0,
+         'SV0':1,
+         'SV1':2,
+         'SV0MIN':3,
+         'SV0MAX':5,
+         'SV1MIN':7,
+         'SV1MAX':9,
+         'ATTACH0':11,
+         'ATTACH1':12,
+         'PULSE0':13,
+         'PULSE1':15,}
+
     def __init__(self) :
         super(CmdInfo, self).__init__()
+        self.packet_size = 0;
 
     def prepare(self) :
         self.packet = array.array('B',
                                   [0xEF, 0x65, CmdServo.FLAG_MEMORY, 0, 0])
-        checksum = self.get_checksum(self.packet)
+        checksum = self.get_checksum(self.packet[2:])
         self.packet.append(checksum)
         return self.packet
 
     def execute(self, ser) :
         ser.write(self.packet)
         ser.flush()
-        time.sleep(0.5)
-        self.recv.extend(list(ser.read(7)))
-        self.recv.extend(list(ser.read(self.recv[5])))
-        self.recv.append(ser.read()) # checksum
+        while ser.in_waiting < CmdServo.RESP_HEADER_SIZE :
+            time.sleep(0.5)
+        self.recv.extend(list(ser.read(CmdServo.RESP_HEADER_SIZE)))
+        while ser.in_waiting < self.recv[CmdServo.RESP_OFFSET['LEN']] :
+            time.sleep(0.5)
+        self.recv.extend(list(ser.read(self.recv[CmdServo.RESP_OFFSET['LEN']])))
+        while ser.in_waiting < CmdServo.RESP_SIZE['SUM'] :
+            time.sleep(0.5)
+        self.recv.extend(list(ser.read(CmdServo.RESP_SIZE['SUM']))) # checksum
         return self.recv
 
     def info(self, pp) :
         print('Returned packet:')
-        
-        sum = self.recv[2]
-        for value in self.recv[3:-1] :
-            sum ^= value
-        print('calculate checksum:{0}'.format(sum))
+        print('[{s}]'.format(s=','.join(['{0:X}'.format(v) for v in self.recv])))
+        checksum = self.get_checksum(self.recv[2:-2])
+        print('calculate checksum:{0}'.format(checksum))
         print('recv checksum:{0}'.format(self.recv[-1]))
-        if sum == ord(self.recv[-1]) :
+        if checksum == self.recv[-1] :
             print('checksum OK')
         else :
             print('checksum NG')
-        print_short_packet_header(self.recv)
-        if self.section == 3:
-            print_section_3(self.recv[7:-1])
-        elif self.section == 5:
-            print_section_5(self.recv[7:-1])
-        else:
-            print("Data:", end='')
-            pp.pprint(self.recv[7:-1])
-        print((self.label_fmt+':{1:#x}').format('Checksum', ord(self.recv[-1])))
+        print((Label_fmt+':{h1:#x},{h2:#x}').format(l='header',
+                                                    h1=self.recv[CmdServo.RESP_OFFSET['HEADER']],
+                                                    h2=self.recv[CmdServo.RESP_OFFSET['HEADER']+1]))
+        print((Label_fmt+':({v:#x})').format(l='flag',
+                                             v=self.recv[CmdServo.RESP_OFFSET['FLAG']]))
+        print((Label_fmt+':{a:#x}').format(l='address',
+                                           a=self.recv[CmdServo.RESP_OFFSET['ADDR']]))
+        print((Label_fmt+':{v:#x}').format(l='length',
+                                           v=self.recv[CmdServo.RESP_OFFSET['LEN']]))
+        #print("Data:", end='')
+        #pp.pprint(self.recv[CmdServo.RESP_OFFSET['DATA']:-1])
+        self.memory = self.recv[CmdServo.RESP_OFFSET['DATA']:-1]
+        print((Label_fmt+':{v}').format(l='DATA;I2C address(no use)',
+                                        v=self.memory[CmdInfo.M['I2C']]))
+        print((Label_fmt+':{v}').format(l='DATA;Servo 0 pin',
+                                        v=self.memory[CmdInfo.M['SV0']]))
+        print((Label_fmt+':{v}').format(l='DATA;Servo 1 pin',
+                                        v=self.memory[CmdInfo.M['SV1']]))
+        print_h_l('DATA;Servo 0 min', self.memory[CmdInfo.M['SV0MIN']:CmdInfo.M['SV0MAX']])
+        print_h_l('DATA;Servo 0 max', self.memory[CmdInfo.M['SV0MAX']:CmdInfo.M['SV1MIN']])
+        print_h_l('DATA;Servo 1 min', self.memory[CmdInfo.M['SV1MIN']:CmdInfo.M['SV1MAX']])
+        print_h_l('DATA;Servo 1 max', self.memory[CmdInfo.M['SV1MAX']:CmdInfo.M['ATTACH0']])
+        print((Label_fmt+':{v}').format(l='DATA;Servo 0 attach',
+                                        v=self.memory[CmdInfo.M['ATTACH0']]))
+        print((Label_fmt+':{v}').format(l='DATA;Servo 1 attach',
+                                        v=self.memory[CmdInfo.M['ATTACH1']]))
+        print_h_l('DATA;Servo 0 pulse', self.memory[CmdInfo.M['PULSE0']:CmdInfo.M['PULSE1']])
+        print_h_l('DATA;Servo 0 pulse', self.memory[CmdInfo.M['PULSE1']:CmdInfo.M['PULSE1']+2])
+        print((Label_fmt+':{v:#x}').format(l='Checksum',
+                                           v=self.recv[-1]))
 
 class CmdAck(CmdServo) :
     """ ACK command. """
@@ -171,7 +217,7 @@ class CmdFlash(CmdServo) :
     def prepare(self, servo_id) :
         self.packet = array.array('B',
                                   [0xEF, 0x65, servo_id, 0x40, 0xFF, 0x00, 0x00])
-        checksum = self.get_checksum(self.packet)
+        checksum = self.get_checksum(self.packet[2:])
         self.packet.append(checksum)
         return self.packet
 
@@ -192,7 +238,7 @@ class CmdAttach(CmdServo) :
             addr = 12
         self.packet = array.array('B',
                                   [0xEF, 0x65, 0, 0, addr, 1, 1, 1])
-        checksum = self.get_checksum(self.packet)
+        checksum = self.get_checksum(self.packet[2:])
         self.packet.append(checksum)
         return self.packet
 
@@ -213,7 +259,7 @@ class CmdDetach(CmdServo) :
             addr = 12
         self.packet = array.array('B',
                                   [0xEF, 0x65, 0, 0, addr, 1, 1, 0])
-        checksum = self.get_checksum(self.packet)
+        checksum = self.get_checksum(self.packet[2:])
         self.packet.append(checksum)
         return self.packet
 
@@ -236,7 +282,7 @@ class CmdAngle(CmdServo) :
         self.packet = array.array('B',
                                   [0xEF, 0x65, 0x00, 0x00, addr, 0x02, 0x01])
         self.packet.extend(degree_packet)
-        checksum = self.get_checksum(self.packet)
+        checksum = self.get_checksum(self.packet[2:])
         self.packet.append(checksum)
         return self.packet
 
@@ -257,7 +303,7 @@ def main() :
                          metavar='DEVICE')
     parser.add_argument('-b', '--baud',
                          dest='baud',
-                         default=115200)
+                         default=9600)
     parser.add_argument('-w', '--wait',
                         type=float,
                         dest='wait',
