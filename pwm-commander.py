@@ -1,49 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # Controlling Arduino nano pwm servo.
-
+#
+# SEE Arduino side: PwmSlave.ino
+#
 # short packet
 # 'EF','65', <<Flag>>, <<addr>>, <<len>>, <<data>>..., <<sum>>
 # 
-# send FLAG
-# 0b01000000:Write to FLASH
-# 0b00000011:memory 0-31
-# 0b00000001:ACK
-#
 # return packet
 # 'EF', '66', <<flag>>, <<addr>>, <<len>>, <<data>>.... <<sum>
-# resp FLAG
-# 0b00000010:send packet error
 #
-#
-# virtual register
-# 0-10 copy from EEPROM at setup(). FLAG_FLASH is 1 then write to EEPROM.
-# 11-  register. attach and pulse.
-# addr description                 default
-# ==== =========================== =======
-#    0 I2C Address                       0
-#    1 Servo 0 digital port number       5
-#    2 Servo 1 digital port number       6
-#    3 Servo 0 minimum pulse (L,H)     800
-#    4 -                                 -
-#    5 Servo 0 maximam pulse (L,H)    2200
-#    6 -                                 -
-#    7 Servo 1 minimum pulse (L,H)     800
-#    8 -                                 -
-#    9 Servo 1 maximam pulse (L,H)    2200
-#   10 -                                 -
-#   11 Servo 0 attach flag               0
-#   12 Servo 1 attach flag               0
-#   13 Servo 0 pulse (L,H)            1100
-#   14 -                                 -
-#   15 Servo 1 pulse (L,H)            1100
-#   16 -                                 -
-
-
 
 import array
 import time
-#import locale
 import serial
 import argparse
 import sys
@@ -58,6 +27,13 @@ def print_h_l(title, memory) :
     print((Label_fmt+':{v:5}({bh:#x},{bl:#x})').format(l=title,
                                                        v=int.from_bytes(list(memory[0:2]), 'big', signed=True),
                                                        bh=memory[0], bl=memory[1]))
+
+def do_dryrun(cmd) :
+    print("====== DRY RUN. NOT EXECUTING =====")
+    print("generate packet:")
+    print('[{s}]'.format(
+        s=','.join(['{0:X}'.format(v) for v in cmd.packet])))
+
 
 class CmdServoException(object) :
     """ CmdServo and sub class exception. """
@@ -129,8 +105,8 @@ class CmdServo(object) :
         print('Returned packet:')
         print('[{s}]'.format(s=','.join(['{0:X}'.format(v) for v in self.recv])))
         checksum = self.get_checksum(self.recv[2:-2])
-        print('calculate checksum:{0}'.format(checksum))
-        print('recv checksum:{0}'.format(self.recv[-1]))
+        print('calculate checksum:{0:#x}'.format(checksum))
+        print('recv checksum:{0:#x}'.format(self.recv[-1]))
         if checksum == self.recv[-1] :
             print('checksum OK')
         else :
@@ -170,6 +146,7 @@ class CmdServo(object) :
     def execute(self) :
         if self.packet is None:
             raise CmdServoException("no prepare packet. coll prepare() before execute.");
+        self.recv = []  # clear recv in loop
 
     def print(self) :
         """ print recieve packet. """
@@ -250,8 +227,8 @@ class CmdAck(CmdServo) :
 
     def prepare(self) :
         self.packet = array.array('B',
-                                  [0xEF, 0x65, CmdServo.FLAG_ACK, 0x00, 0x00, 0x00])
-        checksum = self.get_checksum(self.packet)
+                                  [0xEF, 0x65, CmdServo.FLAG_ACK, 0x00, 0x00,])
+        checksum = self.get_checksum(self.packet[2:])
         self.packet.append(checksum)
         return self.packet
 
@@ -260,12 +237,12 @@ class CmdAck(CmdServo) :
         ser.write(self.packet)
         while ser.in_waiting < CmdServo.RESP_ACK_SIZE :
             time.sleep(0.5)
-        self.recv.append(ser.read())
+        self.recv.extend(list(ser.read()))
         return self.recv
 
     def info(self) :
         print('ACK(\\x07):[{s}]'.format(
-            s=','.join(['{0:X}'.format(v) for v in self.recv])))
+            s=','.join(['{0:#x}'.format(v) for v in self.recv])))
 
 class CmdFlash(CmdServo) :
     """ Write to flash ROM. """
@@ -393,6 +370,10 @@ def main() :
     subparser6.add_argument('servo_id',
                             type=int,
                             help='servo id')
+    subparser7 = subparsers.add_parser('prompt',
+                                       help='interactive mode.')
+    subparser8 = subparsers.add_parser('quit',
+                                       help='quit interactive mdoe.')
     
     args = parser.parse_args()
     
@@ -414,21 +395,61 @@ def main() :
     elif args.subparser_name == 'detach' :
         cmd = CmdDetach()
         cmd.prepare(args.servo_id)
+    elif args.subparser_name == 'quit' :
+        cmd = CmdServo()
+        cmd.prepare()
+        parser.exit(0, 'no interactive mode. nothing to do.\n')
+    elif args.subparser_name == 'prompt' :
+        cmd = CmdServo()
+        cmd.prepare()
+        print('into interactive mode. quit for \'quit\'')
     else :
         parser.exit(0, 'no specifiy command, nothing to do.\n')
     
     if args.dryrun :
-        print("====== DRY RUN. NOT EXECUTING =====")
-        print("generate packet:")
-        print('[{s}]'.format(
-            s=','.join(['{0:X}'.format(v) for v in cmd.packet])))
+        do_dryrun(cmd)
     else :
         ser = serial.Serial(args.port, args.baud, timeout=1)
         print('wait {w} sec. board prepare from port open.'.format(w=args.wait))
         time.sleep(args.wait)
-        cmd.execute(ser)
-        cmd.info()
+        if args.subparser_name != 'prompt' :
+            ser.reset_input_buffer()
+            cmd.execute(ser)
+            cmd.info()
+        else :
+            while True :
+                command_line = input('> ').split()
+                prompt = parser.parse_args(command_line)
+                if prompt.subparser_name == 'ack' :
+                    cmd = CmdAck()
+                    cmd.prepare()
+                elif prompt.subparser_name == 'info' :
+                    cmd = CmdInfo()
+                    cmd.prepare()
+                elif prompt.subparser_name == 'flash' :
+                    cmd = CmdFlash()
+                    cmd.prepare()
+                elif prompt.subparser_name == 'angle' :
+                    cmd = CmdAngle()
+                    cmd.prepare(prompt.servo_id, prompt.degree)
+                elif prompt.subparser_name == 'attach' :
+                    cmd = CmdAttach()
+                    cmd.prepare(prompt.servo_id)
+                elif prompt.subparser_name == 'detach' :
+                    cmd = CmdDetach()
+                    cmd.prepare(prompt.servo_id)
+                elif prompt.subparser_name == 'quit' :
+                    break       #quit while True loop
+                elif prompt.subparser_name == 'prompt' :
+                    print('now interactive mode.')
+                else :
+                    pass
+                if prompt.dryrun :
+                    do_dryrun(cmd)
+                else :
+                    ser.reset_input_buffer()
+                    cmd.execute(ser)
+                    cmd.info()
         ser.close()
-
 if __name__ == '__main__':
     main()
